@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace OneWaySynchronization;
 
@@ -31,7 +31,8 @@ internal static class Program
             var stopwatch = Stopwatch.StartNew();
             await SynchronizeFolders(sourcePath, destinationPath, logPath);
             stopwatch.Stop();
-            LogInformation($"Synchronizing folders completed took {stopwatch.Elapsed.TotalSeconds} seconds. \n", logPath);
+            LogInformation($"Synchronizing folders completed took {stopwatch.Elapsed.TotalSeconds} seconds. \n",
+                logPath);
             stopwatch.Reset();
         }
     }
@@ -59,6 +60,37 @@ internal static class Program
         }
 
         return true;
+    }
+
+    private static void CopyDirectory(string rootDir, string sourceDir, string destinationDir)
+    {
+        if (rootDir != sourceDir)
+        {
+            foreach (var file in Directory.GetFiles(sourceDir))
+            {
+                var destFile = Path.Combine(destinationDir, Path.GetFileName(file));
+                File.Copy(file, destFile, true);
+                LogInformation($"File {file} copied to {destFile}", rootDir);
+            }
+        }
+
+        foreach (var subDir in Directory.GetDirectories(sourceDir))
+        {
+            var destSubDir = Path.Combine(destinationDir, Path.GetFileName(subDir));
+            LogInformation($"Processing subdirectory {subDir}", rootDir);
+            CopyDirectory(rootDir, subDir, destSubDir);
+        }
+    }
+
+    private static void RemoveFolders(string directory, string logFilePath)
+    {
+        foreach (var subdirectory in Directory.GetDirectories(directory))
+        {
+            RemoveFolders(subdirectory, logFilePath);
+
+            Directory.Delete(subdirectory);
+            LogInformation($"Deleted empty folder: {subdirectory}", logFilePath);
+        }
     }
 
     private static async Task SynchronizeFolders(string source, string destination, string logFilePath)
@@ -90,28 +122,32 @@ internal static class Program
         var possibleSameFiles = sourceFiles
             .SelectMany(x => destinationFiles.Where(y => Path.GetFileName(x) == Path.GetFileName(y))).ToList();
 
-        if (possibleSameFiles.Count > 0)
-            foreach (var file in possibleSameFiles)
-                if (await AreFilesEqual(source, destination, file))
-                {
-                    LogInformation($"File {Path.GetFileName(file)} already exist in both directories!", logFilePath);
-                    sourceFiles.Remove(Path.Combine(source, Path.GetFileName(file)));
-                }
-                else
-                {
-                    LogInformation(
-                        $"File {Path.GetFileName(file)} exist in both directories, but are not equal. File in destination directory will be overriden",
-                        logFilePath);
-                }
 
-        if (possibleFilesToRemove.Count > 0)
-            foreach (var file in possibleFilesToRemove)
+        foreach (var file in possibleSameFiles)
+        {
+            if (await AreFilesEqual(source, destination, file))
             {
-                File.Delete(file);
+                LogInformation($"File {Path.GetFileName(file)} already exist in both directories!", logFilePath);
+                sourceFiles.Remove(Path.Combine(source, Path.GetFileName(file)));
+            }
+            else
+            {
                 LogInformation(
-                    $"File {Path.GetFileName(file)} removed from destination as it does not exist in source.",
+                    $"File {Path.GetFileName(file)} exist in both directories, but are not equal. File in destination directory will be overriden",
                     logFilePath);
             }
+        }
+
+        foreach (var file in possibleFilesToRemove)
+        {
+            File.Delete(file);
+            LogInformation(
+                $"File {Path.GetFileName(file)} removed from destination as it does not exist in source.",
+                logFilePath);
+        }
+
+        RemoveFolders(destination, logFilePath);
+        CopyDirectory(source, source, destination);
 
         foreach (var file in sourceFiles)
         {
